@@ -24,8 +24,13 @@ public class TaskController {
 
     // 2️⃣ 할 일 추가
     @PostMapping
-    public Task createTask(@RequestBody Task task) {
-        task.setDone(false);
+    public Task createTask(@RequestBody com.shchoi.todolist.controller.dto.TaskCreateRequest req) {
+        Task task = Task.builder()
+                .date(LocalDate.parse(req.getDate()))
+                .title(req.getTitle())
+                .done(false)
+                .build();
+
         return taskRepository.save(task);
     }
 

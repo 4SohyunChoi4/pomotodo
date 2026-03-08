@@ -62,13 +62,25 @@ const formattedDate = computed(() => {
   };
 });
 
+// 완료 애니메이션 중인 태스크 ID 집합
+const completingIds = ref(new Set());
+
 // 선택된 날짜의 할일 + 누적 미완료, 우선순위 오름차순 정렬
+// completingIds에 있는 항목은 애니메이션이 끝날 때까지 목록에 유지
 const displayTasks = computed(() => {
-  const dated = tasks.value.filter(t => !t.done);
+  const dated = tasks.value.filter(t => !t.done || completingIds.value.has(t.id));
   const overflow = incompleteTasks.value.filter(
-    t => t.date !== selectedDate.value && !dated.find(d => d.id === t.id)
+    t => t.date < selectedDate.value && !dated.find(d => d.id === t.id)
   );
   return [...overflow, ...dated].sort((a, b) => (a.priority || 2) - (b.priority || 2));
+});
+
+// 전체 내역 정렬: 미완료 → 완료, 같은 완료 상태면 날짜 오름차순
+const sortedAllTasks = computed(() => {
+  return [...allTasks.value].sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    return a.date.localeCompare(b.date);
+  });
 });
 
 const doneCount = computed(() => displayTasks.value.filter(t => t.done).length);
@@ -122,10 +134,22 @@ async function addTask() {
 async function toggleDone(t) {
   const newDone = !t.done;
   await setTaskDone(t.id, newDone);
-  // 로컈 즉시 반영 (애니메이션을 위해 잘낙 정도 뚤 후 제거)
-  t.done = newDone;
-  await loadTasks();
-  await loadAll();
+  if (newDone) {
+    // completingIds에 추가 → displayTasks에서 아직 안 사라짐 → 애니메이션 재생 가능
+    completingIds.value = new Set([...completingIds.value, t.id]);
+    t.done = true;
+    // 애니메이션(0.8s) 끝난 후에 목록 갱신 + completingIds 제거
+    setTimeout(async () => {
+      completingIds.value.delete(t.id);
+      completingIds.value = new Set(completingIds.value);
+      await loadTasks();
+      await loadAll();
+    }, 900);
+  } else {
+    t.done = false;
+    await loadTasks();
+    await loadAll();
+  }
 }
 
 async function setPriority(t, p) {
@@ -171,7 +195,7 @@ function isOverdue(d) {
 
 // 우선순위 레이블
 const PRIORITY_LABELS = { 1: "#1", 2: "#2", 3: "#3" };
-const PRIORITY_COLORS = { 1: "#e85a4f", 2: "#c9a800", 3: "#6bab5f" };
+const PRIORITY_COLORS = { 1: "#e85a4f", 2: "#e8a030", 3: "#6bab5f" };
 
 // 데드라인 편집 상태
 const editingDeadline = ref(null); // task.id
@@ -286,9 +310,34 @@ function recordFocusSession(minutes) {
   pomoStats.value = { ...s };
 }
 
+// 포모도로 팝업 내 태스크명 인라인 편집
+const editingPomodoroTitle = ref(false);
+const pomodoroTitleInput = ref("");
+
 function openPomodoro(t) {
   pomodoroTask.value = t;
   pomodoroOpen.value = true;
+  editingPomodoroTitle.value = false;
+}
+function startEditPomodoroTitle() {
+  pomodoroTitleInput.value = pomodoroTask.value?.title || "";
+  editingPomodoroTitle.value = true;
+  // nextTick 대신 setTimeout으로 포커스
+  setTimeout(() => {
+    const el = document.getElementById('pomodoro-title-input');
+    if (el) el.focus();
+  }, 30);
+}
+async function confirmPomodoroTitle() {
+  const newTitle = pomodoroTitleInput.value.trim();
+  if (!newTitle || !pomodoroTask.value) { editingPomodoroTitle.value = false; return; }
+  if (newTitle !== pomodoroTask.value.title) {
+    await api.patch(`/api/tasks/${pomodoroTask.value.id}`, { title: newTitle });
+    pomodoroTask.value.title = newTitle;
+    await loadTasks();
+    await loadAll();
+  }
+  editingPomodoroTitle.value = false;
 }
 function startPomodoro() {
   pomodoroOpen.value = false;
@@ -357,8 +406,32 @@ onMounted(async () => {
     <!-- 헤더 -->
     <header class="site-header">
       <div class="logo">
-        <span class="logo-icon">◎</span>
-        <span class="logo-text">Pomotodo</span>
+        <!-- 뽀모투두 로고: pom + 토마토o + t + 체크o + d + 별o -->
+        <div class="logo-wordmark">
+          <span class="lw-text">p</span>
+          <span class="lw-text">m</span>
+          <span class="lw-o lw-o--tomato">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <circle cx="10" cy="15" r="8" fill="#e8784a"/>
+              <path d="M7 9 Q10 5 13 9" fill="#6bab5f"/>
+              <line x1="10" y1="5.5" x2="10" y2="9" stroke="#6bab5f" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="lw-text">t</span>
+          <span class="lw-o lw-o--check">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <circle cx="10" cy="15" r="8" fill="#6bab5f"/>
+              <path d="M6 15 L8.8 18 L14 11" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </span>
+          <span class="lw-text">d</span>
+          <span class="lw-o lw-o--star">
+            <svg width="20" height="24" viewBox="0 0 20 24">
+              <circle cx="10" cy="15" r="8" fill="#f5c97a"/>
+              <text x="10" y="19" text-anchor="middle" font-size="9" fill="white" font-weight="700">★</text>
+            </svg>
+          </span>
+        </div>
       </div>
       <div class="header-tagline">집중하고, 기록하고, 완성하라</div>
     </header>
@@ -368,11 +441,11 @@ onMounted(async () => {
 
       <!-- 왼쪽: 달력 + 통계 -->
       <aside class="panel panel-calendar">
-        <div class="panel-label">📅 날짜 선택</div>
+        <div class="panel-label">📅 날짜</div>
         <div class="date-hero">
           <div class="date-hero-row">
             <div>
-              <span class="date-big">{{ formattedDate.month }}.{{ String(formattedDate.day).padStart(2,'0') }}</span>
+              <span class="date-big">{{ formattedDate.month }}.{{ String(formattedDate.day)}} </span>
               <span class="date-sub">{{ formattedDate.year }}년 · {{ formattedDate.weekday }}요일</span>
             </div>
             <button class="today-btn" :class="{ 'today-btn--active': selectedDate !== todayYmd }"
@@ -489,10 +562,9 @@ onMounted(async () => {
               <div class="task-body" @click="openPomodoro(t)">
                 <span class="task-title">{{ t.title }}</span>
                 <div class="task-meta">
-                  <span v-if="t.date !== selectedDate" class="overflow-badge">누적</span>
+                  <span v-if="t.date !== selectedDate" class="overflow-badge" :class="{ 'overflow-badge--overdue': t.date < todayYmd }">📌 {{ fmtDate(t.date) }}</span>
                   <span v-if="t.deadline" class="deadline-badge" :class="{ 'deadline-badge--over': isOverdue(t.deadline) }">
-                    <svg class="flag-icon" viewBox="0 0 10 13" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 1v11M1.5 1.5l7 2.5-7 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    {{ fmtDate(t.deadline) }}{{ isOverdue(t.deadline) ? ' ⚠️' : '' }}
+                    🚩 {{ fmtDate(t.deadline) }}{{ isOverdue(t.deadline) ? ' ⚠️' : '' }}
                   </span>
                 </div>
               </div>
@@ -507,9 +579,7 @@ onMounted(async () => {
               <div class="deadline-edit" v-if="editingDeadline === t.id">
                 <input type="date" class="deadline-input-mini" v-model="deadlineInput" @keyup.enter="confirmDeadline(t)" @blur="confirmDeadline(t)" />
               </div>
-              <button v-else class="icon-btn deadline-icon-btn" @click.stop="startEditDeadline(t)" title="데드라인 수정">
-                <svg viewBox="0 0 10 13" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:13px;height:13px"><path d="M1.5 1v11M1.5 1.5l7 2.5-7 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </button>
+              <button v-else class="icon-btn deadline-icon-btn" @click.stop="startEditDeadline(t)" title="데드라인 수정">🚩</button>
 
               <!-- 삭제 -->
               <button class="icon-btn icon-btn--del" @click.stop="deleteTask(t)" title="삭제">×</button>
@@ -527,7 +597,7 @@ onMounted(async () => {
         <div v-if="activeTab === 'all'">
           <div class="panel-label">📂 전체 태스크 내역</div>
           <ul class="task-list">
-            <li v-for="t in allTasks" :key="t.id" class="task-item task-item--compact" :class="{ 'task-done': t.done }">
+            <li v-for="t in sortedAllTasks" :key="t.id" class="task-item task-item--compact task-item--history" :class="{ 'task-done': t.done }">
               <label class="task-check">
                 <input type="checkbox" :checked="t.done" @change="toggleDone(t)" />
                 <span class="checkmark"><svg v-if="t.done" viewBox="0 0 12 10" fill="none"><path d="M1 5L4.5 8.5L11 1.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -537,8 +607,7 @@ onMounted(async () => {
                 <div class="task-meta">
                   <span class="overflow-badge">{{ t.date }}</span>
                   <span v-if="t.deadline" class="deadline-badge" :class="{ 'deadline-badge--over': isOverdue(t.deadline) }">
-                    <svg class="flag-icon" viewBox="0 0 10 13" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 1v11M1.5 1.5l7 2.5-7 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    {{ fmtDate(t.deadline) }}
+                    🚩 {{ fmtDate(t.deadline) }}
                   </span>
                 </div>
               </div>
@@ -558,7 +627,21 @@ onMounted(async () => {
     <div v-if="pomodoroOpen" class="overlay" @click.self="pomodoroOpen=false">
       <div class="popup popup-pomodoro">
         <div class="popup-title">🍅 포모도로 시작</div>
-        <div class="popup-task-name">{{ pomodoroTask?.title }}</div>
+        <!-- 태스크명 인라인 편집 -->
+        <div class="popup-task-name" v-if="!editingPomodoroTitle" @click="startEditPomodoroTitle" title="클릭하여 수정" style="cursor:pointer">
+          {{ pomodoroTask?.title }}
+          <span class="popup-task-edit-hint">✎</span>
+        </div>
+        <div class="popup-task-name popup-task-name--editing" v-else>
+          <input
+            id="pomodoro-title-input"
+            class="popup-title-input"
+            v-model="pomodoroTitleInput"
+            @keyup.enter="confirmPomodoroTitle"
+            @keyup.esc="editingPomodoroTitle = false"
+            @blur="confirmPomodoroTitle"
+          />
+        </div>
         <div class="pomo-settings">
           <div class="pomo-set-row">
             <span>집중 시간</span>
@@ -692,22 +775,30 @@ onMounted(async () => {
 .logo {
   display: flex;
   align-items: center;
-  gap: 10px;
 }
-.logo-icon {
-  font-size: 22px;
-  color: var(--accent);
+/* 로고 워드마크 */
+.logo-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  line-height: 1;
 }
-.logo-text {
-  font-family: var(--font-display);
+.lw-text {
+  font-family: 'Gowun Dodum', 'Malgun Gothic', sans-serif;
   font-size: 22px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  filter: drop-shadow(0 1px 2px rgba(232,120,74,0.15));
+  color: #e8784a;
+  letter-spacing: 0.5px;
+  line-height: 1;
+}
+.lw-o {
+  display: inline-flex;
+  align-items: flex-end;
+  margin: 0 0.5px;
+  line-height: 1;
+}
+.lw-o svg {
+  display: block;
 }
 .header-tagline {
   font-size: 12px;
@@ -944,9 +1035,26 @@ onMounted(async () => {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes taskComplete {
+  0%   { opacity: 1; transform: scale(1) translateX(0); background: rgba(255,255,255,0.92); }
+  10%  { transform: scale(1.05) translateX(-5px); background: rgba(107,171,95,0.15); }
+  22%  { transform: scale(0.96) translateX(4px); }
+  36%  { transform: scale(1.08) translateX(-3px); background: rgba(107,171,95,0.2); }
+  52%  { transform: scale(1.02) translateX(0); opacity: 1; }
+  68%  { transform: scale(0.98) translateX(30px); opacity: 0.8; }
+  85%  { transform: scale(0.93) translateX(70px); opacity: 0.3; }
+  100% { transform: scale(0.88) translateX(110px); opacity: 0; max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; border-width: 0; }
+}
 
-/* 완료된 항목 — 흐릿하게 */
-.task-done {
+/* 완료된 항목 — 통통 튀다가 쒹~ 사라지는 애니메이션 (할 일 탭만) */
+.task-done:not(.task-item--history) {
+  animation: taskComplete 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+  pointer-events: none;
+  overflow: hidden;
+  will-change: transform, opacity;
+}
+/* 전체 내역 탭 완료 항목 — 애니메이션 없이 흐릿하게만 */
+.task-item--history.task-done {
   opacity: 0.38;
   filter: grayscale(0.5);
   background: rgba(0,0,0,0.02) !important;
@@ -956,10 +1064,6 @@ onMounted(async () => {
 .task-done .task-title {
   text-decoration: line-through;
   color: var(--text-muted);
-}
-.task-done:hover {
-  opacity: 0.5;
-  filter: grayscale(0.3);
 }
 
 /* 미완료 항목 — 선명하게 강조 */
@@ -1123,37 +1227,37 @@ onMounted(async () => {
 .overflow-badge {
   font-size: 10px;
   font-family: var(--font-mono);
-  background: rgba(232,120,74,0.12);
-  color: var(--accent);
+  background: rgba(255,192,203,0.18);
+  color: #e8a0b0;
   border-radius: 6px;
   padding: 1px 7px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.overflow-badge--overdue {
+  background: rgba(210,40,30,0.13);
+  color: #c02a1e;
+  font-weight: 700;
 }
 .deadline-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 600;
-  background: rgba(20,148,120,0.1);
-  color: #0d8a6f;
+  background: rgba(109,40,217,0.1);
+  color: #6d28d9;
   border-radius: 6px;
   padding: 1px 8px;
   letter-spacing: 0.02em;
-}
-.flag-icon {
-  width: 9px;
-  height: 12px;
-  flex-shrink: 0;
-  display: inline-block;
-  vertical-align: middle;
 }
 .deadline-badge--over {
   background: rgba(232,90,79,0.13);
   color: #c0392b;
 }
-.task-overflow {
-  border-left: 3px solid var(--accent);
+.task-overflow:not(.task-done) {
+  background: rgba(255,220,220,0.08) !important;
 }
 
 /* ── 드래그 핸들 & 상태 ── */
@@ -1402,6 +1506,40 @@ onMounted(async () => {
   background: rgba(232,120,74,0.07);
   border-radius: 10px;
   border-left: 3px solid var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: background 0.15s;
+}
+.popup-task-name:hover {
+  background: rgba(232,120,74,0.12);
+}
+.popup-task-edit-hint {
+  font-size: 12px;
+  color: var(--accent);
+  opacity: 0.5;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.popup-task-name:hover .popup-task-edit-hint { opacity: 1; }
+.popup-task-name--editing {
+  padding: 4px 8px;
+  cursor: default;
+}
+.popup-task-name--editing:hover { background: rgba(232,120,74,0.07); }
+.popup-title-input {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  outline: none;
+  padding: 6px 6px;
+  border-radius: 6px;
+  border-bottom: 1.5px solid var(--accent);
 }
 
 /* ── 폼모도로 세팅 ── */
@@ -1460,8 +1598,9 @@ onMounted(async () => {
   padding: 12px 20px;
   border-radius: 12px;
   border: none;
-  background: linear-gradient(135deg, var(--accent), #d4623b);
-  color: #fff;
+  background: linear-gradient(135deg, #e8784a, #d4623b);
+  color: white !important;
+  -webkit-text-fill-color: white !important;
   font-family: var(--font-body);
   font-size: 15px;
   font-weight: 700;
@@ -1473,11 +1612,16 @@ onMounted(async () => {
   justify-content: center;
   gap: 8px;
   letter-spacing: 0.02em;
+  text-shadow: none;
+  filter: none;
 }
 .popup-start:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(232,120,74,0.4); }
+.popup-start * {
+  color: white !important;
+  -webkit-text-fill-color: white !important;
+}
 .popup-start-icon {
   font-size: 13px;
-  color: #fff;
 }
 
 /* ── 타이머 팝업 ── */
@@ -1538,15 +1682,18 @@ onMounted(async () => {
 }
 .timer-btn--main {
   padding: 12px 28px;
-  background: linear-gradient(135deg, var(--accent), #d4623b);
-  color: #fff !important;
+  background: linear-gradient(135deg, #e8784a, #d4623b);
+  color: white !important;
+  -webkit-text-fill-color: white !important;
   font-size: 15px;
   font-weight: 700;
   box-shadow: 0 4px 16px rgba(232,120,74,0.35);
   letter-spacing: 0.02em;
+  text-shadow: none;
+  filter: none;
 }
 .timer-btn--main:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(232,120,74,0.5); }
-.popup-timer--break .timer-btn--main { background: linear-gradient(135deg, #6bab5f, #4e8b44); color: #fff !important; box-shadow: 0 4px 16px rgba(107,171,95,0.35); }
+.popup-timer--break .timer-btn--main { background: linear-gradient(135deg, #6bab5f, #4e8b44); color: white !important; -webkit-text-fill-color: white !important; box-shadow: 0 4px 16px rgba(107,171,95,0.35); }
 .timer-btn--reset, .timer-btn--close {
   width: 44px; height: 44px;
   background: #f0ede8;

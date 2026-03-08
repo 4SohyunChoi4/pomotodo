@@ -22,4 +22,8 @@ public class Task {
     private String title;
 
     private boolean done;
+
+    private Integer priority; // 1=높음, 2=보통, 3=낮음
+
+    private LocalDate deadline; // 데드라인 날짜
 }

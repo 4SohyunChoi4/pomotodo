@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="com.obiscr.chatgpt.settings.EasyCodeState">
+    <option name="projectFiles" value="$PROJECT_DIR$/backend/src/main/java/com/shchoi/todolist/controller/dto/TaskCreateRequest.java;/Users/csh/Documents/Projects/pomotodo/backend/src/main/java/com/shchoi/todolist/controller/TaskController.java;/Users/csh/Documents/Projects/pomotodo/backend/src/main/java/com/shchoi/todolist/domain/Task.java;/Users/csh/Documents/Projects/pomotodo/backend/src/main/java/com/shchoi/todolist/repo/TaskRepository.java;/Users/csh/Documents/Projects/pomotodo/backend/src/main/java/com/shchoi/todolist/ServletInitializer.java;/Users/csh/Documents/Projects/pomotodo/backend/src/main/java/com/shchoi/todolist/TodolistApplication.java;/Users/csh/Documents/Projects/pomotodo/backend/src/test/java/com/shchoi/todolist/TodolistApplicationTests.java" />
+  </component>
+</project>

@@ -8,4 +8,8 @@ import java.util.List;
 public interface TaskRepository extends JpaRepository<Task, Long> {
 
     List<Task> findByDate(LocalDate date);
+
+    List<Task> findByDoneFalseOrderByDeadlineAscDateAsc();
+
+    List<Task> findAllByOrderByDateDesc();
 }

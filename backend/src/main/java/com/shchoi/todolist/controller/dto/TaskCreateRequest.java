@@ -8,4 +8,7 @@ import lombok.Setter;
 public class TaskCreateRequest {
     private String date;
     private String title;
+    private Integer priority;
+    private String deadline; // nullable, YYYY-MM-DD
 }
+
